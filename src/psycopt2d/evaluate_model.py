@@ -1,17 +1,20 @@
-from typing import Optional
+from typing import Iterable, Optional
 
 import altair as alt
 import numpy as np
 import pandas as pd
 import wandb
 from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.pipeline import Pipeline
 
+from psycopt2d.tables import generate_feature_importances_table
 from psycopt2d.tables.performance_by_threshold import (
     generate_performance_by_threshold_table,
 )
 from psycopt2d.utils import pred_proba_to_threshold_percentiles
 from psycopt2d.visualization import (
     plot_auc_by_time_from_first_visit,
+    plot_feature_importances,
     plot_metric_by_time_until_diagnosis,
     plot_performance_by_calendar_time,
 )
@@ -21,8 +24,10 @@ from psycopt2d.visualization.sens_over_time import plot_sensitivity_by_time_to_o
 
 def evaluate_model(
     cfg,
+    pipe: Pipeline,
     eval_dataset: pd.DataFrame,
     y_col_name: str,
+    train_col_names: Iterable[str],
     y_hat_prob_col_name: str,
     run: Optional[wandb.run],
 ):
@@ -66,6 +71,32 @@ def evaluate_model(
 
     # Figures
     plots = {}
+
+    # Feature importance
+    # Check if model has feature_importances_ attribute
+    feature_importances = getattr(pipe["model"], "feature_importances_", None)
+
+    if feature_importances is not None:
+        # Handle EBM and other models a bit differently
+        if cfg.model.model_name == "ebm":
+            feature_names = pipe["model"].feature_names
+        else:
+            feature_names = train_col_names
+
+        feature_importances_plot = plot_feature_importances(
+            column_names=feature_names,
+            feature_importances=feature_importances,
+            top_n_feature_importances=cfg.evaluation.top_n_feature_importances,
+        )
+        plots.update(
+            {"feature_importance": feature_importances_plot},
+        )
+        # Log as table too for readability
+        feature_importances_table = generate_feature_importances_table(
+            column_names=feature_names,
+            feature_importances=feature_importances,
+        )
+        run.log({"feature_importance_table": feature_importances_table})
 
     ## Sensitivity by time to outcome
     plots.update(
